@@ -8,3 +8,5 @@
 
 # 🧡 Render Deployment 
 - <a align="center"><a href="https://dashboard.render.com/web/new"> <img src="https://img.shields.io/badge/RENDER%20DEPLOYMENT-red?style=for-the-badge&logo=nike" width="220" height="38.45"/></a></p>
+
+m"><img title="TAP FOR SESSION ID" src="https://img.shields.io/badge/LOG IN FOR SESSION ID-h?color=pink&style=for-the-badge&logo=porsche&logoColor=pink" width="240" height="38.45"/></a></p>
