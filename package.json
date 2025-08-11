@@ -1,6 +1,6 @@
 {
   "name": "FAITH MD",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "FAITH MD is a powerful multi-device WhatsApp bot built using Baileys.",
   "main": "index.js",
   "scripts": {
@@ -12,7 +12,7 @@
     "scene",
     "whatsapp",
     "whatsapp-bot",
-    "the100"
+    "faith"
   ],
   "author": "zezetech",
   "license": "ISC",
