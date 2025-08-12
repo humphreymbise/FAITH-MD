@@ -1,119 +1,50 @@
-const {
-  default: makeWASocket,
-  useSingleFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  makeInMemoryStore,
-} = require('@whiskeysockets/baileys');
-const fs = require('fs');
-const path = require('path');
-const pino = require('pino');
-const http = require('http');
+const { default: makeWASocket, useSingleFileAuthState, DisconnectReason } = require('@whiskeysockets/baileys');
 const { Boom } = require('@hapi/boom');
-const { decode } = require('base64-arraybuffer');
-const config = require('./config');
+const express = require('express');
+const fs = require('fs');
 
-// 🔐 Decode SESSION_ID (format: ZEZE47-MD;;;=><base64>)
-const sessionData = config.SESSION_ID.split(';;;=>')[1];
-fs.writeFileSync('./auth/creds.json', Buffer.from(decode(sessionData)));
+// Express setup for Heroku
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (_, res) => res.send('Bot is running!'));
+app.listen(PORT, () => console.log(`Bot listening on port ${PORT}`));
 
-const { state, saveState } = useSingleFileAuthState('./auth/creds.json');
-const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) });
+// Auth setup
+const { state, saveState } = useSingleFileAuthState('./auth_info.json');
 
+// Main function
 async function startBot() {
-  const { version } = await fetchLatestBaileysVersion();
+    const sock = makeWASocket({
+        auth: state,
+        printQRInTerminal: true
+    });
 
-  const sock = makeWASocket({
-    version,
-    logger: pino({ level: 'silent' }),
-    browser: ['FAITH-MD', 'Safari', '1.0.0'],
-    auth: state,
-    printQRInTerminal: false,
-    getMessage: async () => null,
-  });
+    sock.ev.on('creds.update', saveState);
 
-  store.bind(sock.ev);
-  sock.ev.on('creds.update', saveState);
-
-  // 🔁 Connection handling
-  sock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
-    if (connection === 'close') {
-      const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log(shouldReconnect ? '🌀 Reconnecting...' : '❌ Logged out.');
-      if (shouldReconnect) startBot();
-    }
-
-    if (connection === 'open') {
-      console.log('✅ Bot connected.');
-    }
-  });
-
-  // 📦 Plugin loading
-  const PLUGIN_DIR = path.join(__dirname, 'The100Md_plugins');
-  const plugins = fs
-    .readdirSync(PLUGIN_DIR)
-    .filter((file) => file.endsWith('.js'))
-    .map((file) => require(path.join(PLUGIN_DIR, file)));
-
-  // ⚙️ Message handler
-  sock.ev.on('messages.upsert', async ({ messages }) => {
-    const msg = messages[0];
-    if (!msg?.message || msg.key.fromMe) return;
-
-    const from = msg.key.remoteJid;
-    const sender = msg.key.participant || msg.key.remoteJid;
-
-    // 🟢 Set presence (typing, available, etc.) if enabled
-    if (config.WA_PRESENCE) {
-      try {
-        await sock.sendPresenceUpdate(config.AUTO_SETPRESENCE, from);
-      } catch {}
-    }
-
-    // 👁 Auto status view
-    if (config.AUTO_STATUS_VIEW === 'true' && from === 'status@broadcast') {
-      try {
-        await sock.readMessages([msg.key]);
-      } catch {}
-      return;
-    }
-
-    // 🧠 Extract command
-    const body =
-      msg.message.conversation ||
-      msg.message?.extendedTextMessage?.text ||
-      msg.message?.imageMessage?.caption ||
-      msg.message?.videoMessage?.caption ||
-      '';
-    const command = body.startsWith(config.PREFIX)
-      ? body.slice(1).split(' ')[0].toLowerCase()
-      : null;
-
-    if (!command) return;
-
-    // 🔒 Restrict channels to owner only
-    if (from.endsWith('@newsletter') && !config.OWNER_NUMBER.includes(sender.split('@')[0])) {
-      return sock.sendMessage(from, { text: '🔒 Only owner can use the bot in channels.' }, { quoted: msg });
-    }
-
-    for (const plugin of plugins) {
-      try {
-        if (plugin.pattern?.toLowerCase() === command) {
-          await plugin.run({ sock, msg, from, command, config, coms: plugins });
+    sock.ev.on('connection.update', (update) => {
+        const { connection, lastDisconnect } = update;
+        if (connection === 'close') {
+            const shouldReconnect = (lastDisconnect.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+            console.log('connection closed due to', lastDisconnect.error, ', reconnecting', shouldReconnect);
+            if (shouldReconnect) {
+                startBot();
+            }
+} else if (connection === 'open') {
+            console.log('✅ BOT CONNECTED TO WHATSAPP');
         }
-      } catch (err) {
-        console.error(`❌ Plugin error:`, err);
-        sock.sendMessage(from, { text: '⚠️ Command error.' }, { quoted: msg });
-      }
-    }
-  });
+    });
+
+    // Listener for incoming messages
+    sock.ev.on('messages.upsert', async ({ messages, type }) => {
+        const msg = messages[0];
+        if (!msg.message || msg.key.fromMe) return;
+
+        const text = msg.message.conversation || msg.message.extendedTextMessage?.text;
+        if (text === 'ping') {
+            await sock.sendMessage(msg.key.remoteJid, { text: 'pong 🏓' });
+        }
+    });
 }
 
-// 🌐 Keep alive (e.g. Render)
-http.createServer((_, res) => {
-  res.writeHead(200, { 'Content-Type': 'text/plain' });
-  res.end('✅ Bot is alive.');
-}).listen(process.env.PORT || 8080);
-
-// 🚀 Launch
 startBot();
+```
