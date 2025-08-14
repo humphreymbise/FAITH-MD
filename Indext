@@ -1,0 +1,47 @@
+const {
+  spawn
+} = require("child_process");
+const path = require("path");
+class BotProcessManager {
+  constructor() {
+    this.botProcess = null;
+    this.startBot();
+  }
+  ["startBot"]() {
+    const _0x44eb22 = [path.join(__dirname, "main.js"), ...process.argv.slice(2)];
+    console.log("\n[45m[1m[37m⚡⚡⚡ LAUNCHING QUEEN RUVA AI BETA ⚡⚡⚡[0m");
+    console.log("[36m[1m▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬[0m");
+    console.log("[1m[33m🌐 PROCESS: [32m" + process.argv[0] + "[0m");
+    console.log("[1m[33m🔧 ARGUMENTS: [36m" + _0x44eb22.join(" ") + "[0m" + "\n");
+    console.log("[2m[37m🚀 DEVELOPED BY ICONIC TECH[0m");
+    console.log("[36m[1m▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬[0m\n");
+    this.botProcess = spawn(process.argv[0], _0x44eb22, {
+      'stdio': ["inherit", "inherit", "inherit", "ipc"]
+    });
+    this.configureProcessEvents();
+  }
+  ["configureProcessEvents"]() {
+    this.botProcess.on("message", _0x3a3b93 => {
+      if (_0x3a3b93 === "reset") {
+        this.restartBot();
+      }
+    });
+    this.botProcess.on("exit", _0x3064ee => {
+      console.log("\n[41m[1m[37m💔 Process terminated with code: " + _0x3064ee + " " + "[0m");
+      const _0x262e27 = [0, 1, '.'].includes(_0x3064ee);
+      if (_0x262e27) {
+        this.restartBot();
+      }
+    });
+  }
+  ["restartBot"]() {
+    console.log("\n[43m[30m[1m♻️ RESTARTING QUEEN RUVA AI BETA...[0m");
+    this.botProcess.kill();
+    setTimeout(() => {
+      this.startBot();
+    }, 1000);
+  }
+}
+console.log("[44m[1m[37m   ICONIC TECH PRESENTS   [0m");
+console.log("[45m[1m[37m   QUEEN RUVA AI BETA   [0m\n");
+new BotProcessManager();
