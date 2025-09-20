@@ -1,199 +1,139 @@
 const {
-default: makeWASocket,
-useMultiFileAuthState,
-DisconnectReason,
-jidNormalizedUser,
-getContentType,
-fetchLatestBaileysVersion,
-Browsers
-} = require('@whiskeysockets/baileys')
-
-
-const l = console.log
-const { getBuffer, getGroupAdmins, getRandom, h2k, isUrl, Json, runtime, sleep, fetchJson } = require('./lib/functions')
-const fs = require('fs')
-const ff = require('fluent-ffmpeg')
-const P = require('pino')
-const config = require('./config')
-const qrcode = require('qrcode-terminal')
-const StickersTypes = require('wa-sticker-formatter')
-const util = require('util')
-const { sms,downloadMediaMessage } = require('./lib/msg')
-const axios = require('axios')
-const { File } = require('megajs')
-const { fromBuffer } = require('file-type')
-const bodyparser = require('body-parser')
-const { tmpdir } = require('os')
-const Crypto = require('crypto')
-const path = require('path')
-const prefix = config.PREFIX
-
-const ownerNumber = ['254740007567']
-
-//===================SESSION-AUTH============================
-if (!fs.existsSync(__dirname + '/auth_info_baileys/creds.json')) {
-if(!config.SESSION_ID) return console.log('Please add your session to SESSION_ID env !!')
-const sessdata = config.SESSION_ID
-const filer = File.fromURL(`https://mega.nz/file/${sessdata}`)
-filer.download((err, data) => {
-if(err) throw err
-fs.writeFile(__dirname + '/auth_info_baileys/creds.json', data, () => {
-console.log("Session Download Complete  ✅")
-})})}
-
-const express = require("express");
-const app = express();
-const port = process.env.PORT || 9090;
-
-//=============================================
-
-async function connectToWA() {
-console.log("Connecting Bentley...");
-const { state, saveCreds } = await useMultiFileAuthState(__dirname + '/auth_info_baileys/')
-var { version } = await fetchLatestBaileysVersion()
-
-const conn = makeWASocket({
-        logger: P({ level: 'silent' }),
-        printQRInTerminal: false,
-        browser: Browsers.macOS("Firefox"),
-        syncFullHistory: true,
-        auth: state,
-        version
-        })
-    
-conn.ev.on('connection.update', (update) => {
-const { connection, lastDisconnect } = update
-if (connection === 'close') {
-if (lastDisconnect.error.output.statusCode !== DisconnectReason.loggedOut) {
-connectToWA()
-}
-} else if (connection === 'open') {
-console.log('Installing Plugin Files Please Wait......')
+  default: makeWASocket,
+  useSingleFileAuthState,
+  DisconnectReason,
+  fetchLatestBaileysVersion,
+  makeInMemoryStore,
+} = require('@whiskeysockets/baileys');
+const fs = require('fs');
 const path = require('path');
-fs.readdirSync("./plugins/").forEach((plugin) => {
-if (path.extname(plugin).toLowerCase() == ".js") {
-require("./plugins/" + plugin);
-}
-});
-console.log('Plugins Gile Installation Successful')
-console.log('*Mercedes Connected. Enjoy*')
+const pino = require('pino');
+const http = require('http');
+const { Boom } = require('@hapi/boom');
+const { decode } = require('base64-arraybuffer');
+const config = require('./config');
 
-let up = `*Mercedes Connected*
-*╭┈───────────────•*
-*│  ◦* *Join Other Followers*
-*│  ◦* *https://shorturl.at/bgxHZ*
-*│  ◦* *YouTube Tutorials*
-*│  ◦* *https://youtube.com/@wemacomic*
-*│  ◦* *Prefix: [${prefix}]*
-*╰┈───────────────•*
-*Mercedes Is Powered By V8 Engine*
+// 📂 Auth folder setup (works with Railway Volumes at /app/auth)
+const AUTH_DIR = path.join(process.cwd(), 'auth');
+fs.mkdirSync(AUTH_DIR, { recursive: true });
+const CREDS_PATH = path.join(AUTH_DIR, 'creds.json');
 
-> Masterminded by Marisel`;
-conn.sendMessage(conn.user.id, { image: { url: `https://i.imgur.com/Hy1gYNz.jpeg` }, caption: up })
+// 🔐 Decode SESSION_ID (format: ALONE-MD;;;=><base64>)
+if (config.SESSION_ID) {
+  try {
+    const sessionData = config.SESSION_ID.split(';;;=>')[1];
+    fs.writeFileSync(CREDS_PATH, Buffer.from(decode(sessionData)));
+  } catch (err) {
+    console.error("❌ Failed to decode SESSION_ID:", err);
+  }
+}
 
-}
-})
-conn.ev.on('creds.update', saveCreds)  
+const { state, saveState } = useSingleFileAuthState(CREDS_PATH);
+const store = makeInMemoryStore({ logger: pino().child({ level: 'silent', stream: 'store' }) });
 
-conn.ev.on('messages.upsert', async(mek) => {
-mek = mek.messages[0]
-if (!mek.message) return	
-mek.message = (getContentType(mek.message) === 'ephemeralMessage') ? mek.message.ephemeralMessage.message : mek.message
-if (mek.key && mek.key.remoteJid === 'status@broadcast' && config.AUTO_READ_STATUS === "true"){
-await conn.readMessages([mek.key])
-}
-const m = sms(conn, mek)
-const type = getContentType(mek.message)
-const content = JSON.stringify(mek.message)
-const from = mek.key.remoteJid
-const quoted = type == 'extendedTextMessage' && mek.message.extendedTextMessage.contextInfo != null ? mek.message.extendedTextMessage.contextInfo.quotedMessage || [] : []
-const body = (type === 'conversation') ? mek.message.conversation : (type === 'extendedTextMessage') ? mek.message.extendedTextMessage.text : (type == 'imageMessage') && mek.message.imageMessage.caption ? mek.message.imageMessage.caption : (type == 'videoMessage') && mek.message.videoMessage.caption ? mek.message.videoMessage.caption : ''
-const isCmd = body.startsWith(prefix)
-const command = isCmd ? body.slice(prefix.length).trim().split(' ').shift().toLowerCase() : ''
-const args = body.trim().split(/ +/).slice(1)
-const q = args.join(' ')
-const isGroup = from.endsWith('@g.us')
-const sender = mek.key.fromMe ? (conn.user.id.split(':')[0]+'@s.whatsapp.net' || conn.user.id) : (mek.key.participant || mek.key.remoteJid)
-const senderNumber = sender.split('@')[0]
-const botNumber = conn.user.id.split(':')[0]
-const pushname = mek.pushName || 'Sin Nombre'
-const isMe = botNumber.includes(senderNumber)
-const isOwner = ownerNumber.includes(senderNumber) || isMe
-const botNumber2 = await jidNormalizedUser(conn.user.id);
-const groupMetadata = isGroup ? await conn.groupMetadata(from).catch(e => {}) : ''
-const groupName = isGroup ? groupMetadata.subject : ''
-const participants = isGroup ? await groupMetadata.participants : ''
-const groupAdmins = isGroup ? await getGroupAdmins(participants) : ''
-const isBotAdmins = isGroup ? groupAdmins.includes(botNumber2) : false
-const isAdmins = isGroup ? groupAdmins.includes(sender) : false
-const isReact = m.message.reactionMessage ? true : false
-const reply = (teks) => {
-conn.sendMessage(from, { text: teks }, { quoted: mek })
-}
-        
-conn.sendFileUrl = async (jid, url, caption, quoted, options = {}) => {
-              let mime = '';
-              let res = await axios.head(url)
-              mime = res.headers['content-type']
-              if (mime.split("/")[1] === "gif") {
-                return conn.sendMessage(jid, { video: await getBuffer(url), caption: caption, gifPlayback: true, ...options }, { quoted: quoted, ...options })
-              }
-              let type = mime.split("/")[0] + "Message"
-              if (mime === "application/pdf") {
-                return conn.sendMessage(jid, { document: await getBuffer(url), mimetype: 'application/pdf', caption: caption, ...options }, { quoted: quoted, ...options })
-              }
-              if (mime.split("/")[0] === "image") {
-                return conn.sendMessage(jid, { image: await getBuffer(url), caption: caption, ...options }, { quoted: quoted, ...options })
-              }
-              if (mime.split("/")[0] === "video") {
-                return conn.sendMessage(jid, { video: await getBuffer(url), caption: caption, mimetype: 'video/mp4', ...options }, { quoted: quoted, ...options })
-              }
-              if (mime.split("/")[0] === "audio") {
-                return conn.sendMessage(jid, { audio: await getBuffer(url), caption: caption, mimetype: 'audio/mpeg', ...options }, { quoted: quoted, ...options })
-              }
-            }
-//=================================WORKTYPE=========================================== 
-if(!isOwner && config.MODE === "private") return
-if(!isOwner && isGroup && config.MODE === "inbox") return
-if(!isOwner && isGroup && config.MODE === "groups") return
-//======================================================       
-const events = require('./command')
-const cmdName = isCmd ? body.slice(1).trim().split(" ")[0].toLowerCase() : false;
-if (isCmd) {
-const cmd = events.commands.find((cmd) => cmd.pattern === (cmdName)) || events.commands.find((cmd) => cmd.alias && cmd.alias.includes(cmdName))
-if (cmd) {
-if (cmd.react) conn.sendMessage(from, { react: { text: cmd.react, key: mek.key }})
+async function startBot() {
+  const { version } = await fetchLatestBaileysVersion();
 
-try {
-cmd.function(conn, mek, m,{from, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply});
-} catch (e) {
-console.error("[PLUGIN ERROR] " + e);
-}
-}
-}
-events.commands.map(async(command) => {
-if (body && command.on === "body") {
-command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-} else if (mek.q && command.on === "text") {
-command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-} else if (
-(command.on === "image" || command.on === "photo") &&
-mek.type === "imageMessage"
-) {
-command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-} else if (
-command.on === "sticker" &&
-mek.type === "stickerMessage"
-) {
-command.function(conn, mek, m,{from, l, quoted, body, isCmd, command, args, q, isGroup, sender, senderNumber, botNumber2, botNumber, pushname, isMe, isOwner, groupMetadata, groupName, participants, groupAdmins, isBotAdmins, isAdmins, reply})
-}});
+  const sock = makeWASocket({
+    version,
+    logger: pino({ level: 'silent' }),
+    browser: ['The100-MD', 'Safari', '1.0.0'],
+    auth: state,
+    printQRInTerminal: false,
+    getMessage: async () => null,
+  });
 
-})
+  store.bind(sock.ev);
+  sock.ev.on('creds.update', saveState);
+
+  // 🔁 Connection handling
+  sock.ev.on('connection.update', async ({ connection, lastDisconnect }) => {
+    if (connection === 'close') {
+      const shouldReconnect = new Boom(lastDisconnect?.error)?.output?.statusCode !== DisconnectReason.loggedOut;
+      console.log(shouldReconnect ? '🌀 Reconnecting...' : '❌ Logged out.');
+      if (shouldReconnect) startBot();
+    }
+
+    if (connection === 'open') {
+      console.log('✅ Bot connected.');
+    }
+  });
+
+  // 📦 Plugin loading
+  const PLUGIN_DIR = path.join(__dirname, 'The100Md_plugins');
+  if (fs.existsSync(PLUGIN_DIR)) {
+    const plugins = fs
+      .readdirSync(PLUGIN_DIR)
+      .filter((file) => file.endsWith('.js'))
+      .map((file) => require(path.join(PLUGIN_DIR, file)));
+
+    // ⚙️ Message handler
+    sock.ev.on('messages.upsert', async ({ messages }) => {
+      const msg = messages[0];
+      if (!msg?.message || msg.key.fromMe) return;
+
+      const from = msg.key.remoteJid;
+      const sender = msg.key.participant || msg.key.remoteJid;
+
+      // 🟢 Set presence if enabled
+      if (config.WA_PRESENCE) {
+        try {
+          await sock.sendPresenceUpdate(config.AUTO_SETPRESENCE, from);
+        } catch {}
+      }
+
+      // 👁 Auto status view
+      if (config.AUTO_STATUS_VIEW === 'true' && from === 'status@broadcast') {
+        try {
+          await sock.readMessages([msg.key]);
+        } catch {}
+        return;
+      }
+
+      // 🧠 Extract command
+      const body =
+        msg.message.conversation ||
+        msg.message?.extendedTextMessage?.text ||
+        msg.message?.imageMessage?.caption ||
+        msg.message?.videoMessage?.caption ||
+        '';
+      const command = body.startsWith(config.PREFIX)
+        ? body.slice(1).split(' ')[0].toLowerCase()
+        : null;
+
+      if (!command) return;
+
+      // 🔒 Restrict channels to owner only
+      if (from.endsWith('@newsletter') && !config.OWNER_NUMBER.includes(sender.split('@')[0])) {
+        return sock.sendMessage(
+          from,
+          { text: '🔒 Only owner can use the bot in channels.' },
+          { quoted: msg }
+        );
+      }
+
+      // 🚀 Run plugins
+      for (const plugin of plugins) {
+        try {
+          if (plugin.pattern?.toLowerCase() === command) {
+            await plugin.run({ sock, msg, from, command, config, coms: plugins });
+          }
+        } catch (err) {
+          console.error(`❌ Plugin error:`, err);
+          sock.sendMessage(from, { text: '⚠️ Command error.' }, { quoted: msg });
+        }
+      }
+    });
+  } else {
+    console.log("⚠️ No plugins folder found. Skipping plugin load.");
+  }
 }
-app.get("/", (req, res) => {
-res.send("Hello, Bentley is Active");
-});
-app.listen(port, () => console.log(`Server listening on port http://localhost:${port}`));
-setTimeout(() => {
-connectToWA()
-}, 4000);
+
+// 🌐 Keep alive (for Railway public URL)
+http.createServer((_, res) => {
+  res.writeHead(200, { 'Content-Type': 'text/plain' });
+  res.end('✅ Bot is alive.');
+}).listen(process.env.PORT || 8080);
+
+// 🚀 Launch
+startBot();
